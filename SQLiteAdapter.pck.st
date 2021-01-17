@@ -1,10 +1,10 @@
-'From Cuis 5.0 [latest update: #4520] on 17 January 2021 at 12:01:53 pm'!
+'From Cuis 5.0 [latest update: #4520] on 17 January 2021 at 12:25:57 pm'!
 'Description Cuis SQLite3 adapter for the SQLite3 file/in-memory database
 
 License: MIT
 Author: Josef Philip Berhart
 Authors of the Squeak version: Milan Vavra and others, see AUTHORS.md'!
-!provides: 'SQLiteAdapter' 1 11!
+!provides: 'SQLiteAdapter' 1 12!
 !requires: 'FFI' 1 33 nil!
 SystemOrganization addCategory: 'SQLiteAdapter'!
 SystemOrganization addCategory: 'SQLiteAdapter-Tests'!
@@ -20,14 +20,14 @@ Dictionary subclass: #SQLiteRecord
 SQLiteRecord class
 	instanceVariableNames: ''!
 
-!classDefinition: #SQLiteConnectionTest category: 'SQLiteAdapter-Tests'!
-TestCase subclass: #SQLiteConnectionTest
-	instanceVariableNames: 'db'
+!classDefinition: #SQLiteIntegrationTest category: 'SQLiteAdapter-Tests'!
+TestCase subclass: #SQLiteIntegrationTest
+	instanceVariableNames: 'db usedClass'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'SQLiteAdapter-Tests'!
-!classDefinition: 'SQLiteConnectionTest class' category: 'SQLiteAdapter-Tests'!
-SQLiteConnectionTest class
+!classDefinition: 'SQLiteIntegrationTest class' category: 'SQLiteAdapter-Tests'!
+SQLiteIntegrationTest class
 	instanceVariableNames: ''!
 
 !classDefinition: #Sqlite3Library category: 'SQLiteAdapter'!
@@ -110,55 +110,60 @@ names: names values: values
 names: names values: values
 	^self new names: names values: values! !
 
-!SQLiteConnectionTest methodsFor: 'running' stamp: 'jpb 1/16/2021 22:15:25'!
+!SQLiteIntegrationTest methodsFor: 'running' stamp: 'jpb 1/16/2021 22:15:25'!
 databaseFileName
 	"Macs (tested OS X 6.2) require absolute file paths to the database, Windows and Ubuntu do not"
 	
 	^ (DirectoryEntry currentDirectory / self databaseName) asString asFileEntry.! !
 
-!SQLiteConnectionTest methodsFor: 'running' stamp: 'jpb 1/16/2021 22:11:51'!
+!SQLiteIntegrationTest methodsFor: 'running' stamp: 'jpb 1/17/2021 12:24:22'!
 setUp
+	| settings |
 	super setUp.
 	
-	db _ self defaultTestClass fileNamed: self databaseFileName.! !
+	usedClass _ SQLiteClient.
+	settings _ {
+		#filename -> self databaseFileName asString.
+	} asDictionary.
+	
+	db _ usedClass newFrom: settings.! !
 
-!SQLiteConnectionTest methodsFor: 'running' stamp: 'jpb 1/16/2021 22:12:11'!
+!SQLiteIntegrationTest methodsFor: 'running' stamp: 'jpb 1/16/2021 22:12:11'!
 tearDown
 	db close.
 	self databaseFileName delete.
 	super tearDown! !
 
-!SQLiteConnectionTest methodsFor: 'accessing' stamp: 'spd 5/19/2010 14:32'!
+!SQLiteIntegrationTest methodsFor: 'accessing' stamp: 'spd 5/19/2010 14:32'!
 databaseName
 	^'sqlite_test_database.db'
 	
 ! !
 
-!SQLiteConnectionTest methodsFor: 'accessing' stamp: 'jpb 1/17/2021 12:01:45'!
-defaultTestClass
-	^SQLiteClient ! !
-
-!SQLiteConnectionTest methodsFor: 'testing' stamp: 'tbn 1/25/2010 20:28'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 1/17/2021 12:03:31'!
 testInstanceCreation
  
 	self 
 		assert: db notNil;
-		assert: db class = self defaultTestClass;
-		deny: (self defaultTestClass registry includes: db).
+		assert: db class = usedClass;
+		deny: (usedClass registry includes: db).
 	
 ! !
 
-!SQLiteConnectionTest methodsFor: 'testing' stamp: 'ar 1/4/2012 10:50'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 1/17/2021 12:25:39'!
 testPreparedStatements
 
 	(db execute: 'select * from sqlite_master' args: {}) ifEmpty:[
 		db execute: 'create table employee (id INTEGER PRIMARY KEY, name TEXT, created DATE)'
 			args: {}.
 	].
+
 	db execute: 'insert into employee values (?, ?, ?)' 
 		args: {1. 'Adam'. DateAndTime now}.
+		
 	db execute: 'insert into employee values (?, ?, ?)' 
 		args: {2. 'Eve'. nil}.
+		
 	db execute: 'select id, name from employee where name = ?' args: {'Adam'} do:[:id :name|
 		self assert: id = 1.
 		self assert: name = 'Adam'.
@@ -171,18 +176,18 @@ testPreparedStatements
 	].
 ! !
 
-!SQLiteConnectionTest methodsFor: 'testing' stamp: 'tbn 1/25/2010 20:28'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 1/17/2021 12:02:44'!
 testRegistration
 
 	db open.
 	
-	self assert: (self defaultTestClass registry includes: db).	
+	self assert: (usedClass registry includes: db).	
 	
 	db close.
 	
-	self deny: (self defaultTestClass registry includes: db).	! !
+	self deny: (usedClass registry includes: db).	! !
 
-!SQLiteConnectionTest methodsFor: 'testing' stamp: 'tbn 1/25/2010 20:54'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'tbn 1/25/2010 20:54'!
 testTableCreation
 	|sql|
 	db open.	
@@ -192,12 +197,13 @@ testTableCreation
 		self assert: sql = (each nextRow at: 'sql')] 
 	 ! !
 
-!SQLiteConnectionTest methodsFor: 'testing' stamp: 'tbn 1/25/2010 21:03'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 1/17/2021 12:25:22'!
 testUseDatabase
 	|s1 s2 s3 arrayOfDicts|
 	s1 _ 'create table employee (id, name)'.
 	s2 _ 'insert into employee values (1, ''Adam'')'.
 	s3 _ 'insert into employee values (2, ''Eve'')'.
+	
 	(Array with: s1 with: s2 with: s3)
 		do: [:sql | db  executeQuery: sql].
 	
@@ -560,6 +566,19 @@ changedRows
 		ifFalse: [0]
 	! !
 
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
+close
+	self unregister.
+	self isOpen ifTrue: [Sqlite3Library default close: reference].
+	reference _ nil.
+! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'ar 12/12/2011 20:50'!
+commit
+	txn _ false.
+	self execute: 'COMMIT' args: {}.
+! !
+
 !SQLiteClient methodsFor: 'public' stamp: 'ab 1/29/2003 16:37'!
 executeQuery: aString
 	^ self withResultForQuery: aString do:
@@ -572,12 +591,34 @@ executeQuery: aString
 fileName
 	^ fileName! !
 
+!SQLiteClient methodsFor: 'public' stamp: 'ab 12/16/2002 00:28'!
+isOpen
+	^ reference notNil and: [reference getHandle anySatisfy: [:i | i > 0]]! !
+
 !SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
 lastInsertId
 	^ self isOpen
 		ifTrue: [Sqlite3Library default lastInsertId: reference]
 		ifFalse: [0]
 	! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
+open
+	reference _ Sqlite3Library default open: fileName.
+	self register.
+! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'ar 12/12/2011 20:51'!
+rollback
+	txn _ false.
+	self execute: 'ROLLBACK' args: {}.
+! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'ar 12/12/2011 20:50'!
+transact
+	txn _ true.
+	self execute: 'BEGIN TRANSACTION' args: {}.
+! !
 
 !SQLiteClient methodsFor: 'public' stamp: 'jpb 1/17/2021 12:01:31'!
 transaction: aBlock
@@ -601,48 +642,6 @@ withResultForQuery: aString do: aBlock
 	
 	^ [aBlock value: result] ensure: [result free]! !
 
-!SQLiteClient methodsFor: 'private' stamp: 'jpb 1/14/2021 19:14:35'!
-close
-	self unregister.
-	self isOpen ifTrue: [Sqlite3Library default close: reference].
-	reference _ nil.
-! !
-
-!SQLiteClient methodsFor: 'private' stamp: 'ar 12/12/2011 20:50'!
-commit
-	txn _ false.
-	self execute: 'COMMIT' args: {}.
-! !
-
-!SQLiteClient methodsFor: 'private' stamp: 'jpb 1/16/2021 22:13:06'!
-fileName: aString
-	"* Macs (tested OS 10.6.2) require an absolute file path to the database, Windows and Ubuntu do not
-	 * To create an in-memory database, pass ':memory:' as the argument."
-
-	fileName _ aString asString! !
-
-!SQLiteClient methodsFor: 'private' stamp: 'ab 12/16/2002 00:28'!
-isOpen
-	^ reference notNil and: [reference getHandle anySatisfy: [:i | i > 0]]! !
-
-!SQLiteClient methodsFor: 'private' stamp: 'jpb 1/14/2021 19:14:35'!
-open
-	reference _ Sqlite3Library default open: fileName.
-	self register.
-! !
-
-!SQLiteClient methodsFor: 'private' stamp: 'ar 12/12/2011 20:51'!
-rollback
-	txn _ false.
-	self execute: 'ROLLBACK' args: {}.
-! !
-
-!SQLiteClient methodsFor: 'private' stamp: 'ar 12/12/2011 20:50'!
-transact
-	txn _ true.
-	self execute: 'BEGIN TRANSACTION' args: {}.
-! !
-
 !SQLiteClient methodsFor: 'prepared statements' stamp: 'ar 12/9/2011 19:23'!
 execute: query args: args
 	^Array streamContents:[:s|
@@ -656,9 +655,19 @@ execute: query args: args do: aBlock
 	^Sqlite3Library default execute: query args: args on: reference do: aBlock.
 ! !
 
-!SQLiteClient class methodsFor: 'instance creation' stamp: 'jpb 1/16/2021 22:12:48'!
-fileNamed: aString
-	^ self new fileName: aString! !
+!SQLiteClient methodsFor: 'as yet unclassified' stamp: 'jpb 1/17/2021 12:23:30'!
+initializeWith: newSettings
+	self initialize.
+	
+	fileName _ newSettings at: #filename! !
+
+!SQLiteClient class methodsFor: 'instance creation' stamp: 'jpb 1/17/2021 12:20:56'!
+newFrom: newSettings
+	| newClient |
+	newClient _ self basicNew.
+	newClient initializeWith: newSettings.
+	
+	^newClient! !
 
 !SQLiteClient class methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:58'!
 registry
