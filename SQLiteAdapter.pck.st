@@ -1,10 +1,10 @@
-'From Cuis 5.0 [latest update: #4520] on 17 January 2021 at 12:25:57 pm'!
+'From Cuis 5.0 [latest update: #4567] on 21 April 2021 at 10:03:34 am'!
 'Description Cuis SQLite3 adapter for the SQLite3 file/in-memory database
 
 License: MIT
 Author: Josef Philip Berhart
 Authors of the Squeak version: Milan Vavra and others, see AUTHORS.md'!
-!provides: 'SQLiteAdapter' 1 12!
+!provides: 'SQLiteAdapter' 1 20!
 !requires: 'FFI' 1 33 nil!
 SystemOrganization addCategory: 'SQLiteAdapter'!
 SystemOrganization addCategory: 'SQLiteAdapter-Tests'!
@@ -212,6 +212,12 @@ testUseDatabase
 	self assert: (arrayOfDicts first at: 'name') = 'Adam'
 	! !
 
+!Sqlite3Library methodsFor: 'api' stamp: 'jpb 4/19/2021 08:06:50'!
+apiBindBlob: stmt with: index with: value with: length with: destructor
+	"int sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int n, void(*)(void*));"
+	<cdecl: long 'sqlite3_bind_blob' (ulong long char* long long)>
+	^self externalCallFailed! !
+
 !Sqlite3Library methodsFor: 'api' stamp: 'ar 12/8/2011 13:33'!
 apiBindDouble: stmt with: index with: double
 	"int sqlite3_bind_double(sqlite3_stmt*, int, double);"
@@ -253,6 +259,18 @@ apiClose: sqlite
 	"int sqlite3_close(sqlite3*)"
 	<cdecl: long 'sqlite3_close' (SqliteReference)>
 	^ self externalCallFailed ! !
+
+!Sqlite3Library methodsFor: 'api' stamp: 'jpb 4/21/2021 09:47:19'!
+apiColumnBlob: hStmt with: iCol
+	"const void *sqlite3_column_blob(sqlite3_stmt*, int iCol)"
+	<cdecl: void* 'sqlite3_column_blob' (ulong long)>
+	^self externalCallFailed! !
+
+!Sqlite3Library methodsFor: 'api' stamp: 'jpb 4/21/2021 09:27:30'!
+apiColumnBytes: hStmt with: iCol
+	"char* sqlite3_column_int(sqlite3_stmt*, int iCol);"
+	<cdecl: long 'sqlite3_column_bytes' (ulong long)>
+	^self externalCallFailed! !
 
 !Sqlite3Library methodsFor: 'api' stamp: 'ar 12/8/2011 14:44'!
 apiColumnCount: hStmt
@@ -351,96 +369,15 @@ apiStep: hStmt
 	<cdecl: long 'sqlite3_step' (ulong)>
 	^self externalCallFailed! !
 
-!Sqlite3Library methodsFor: 'accessing' stamp: 'ar 12/8/2011 15:11'!
-bindArg: arg at: index in: stmt
-
-	arg == true ifTrue:[^self apiBindInt: stmt with: index with: 1].
-	arg == false ifTrue:[^self apiBindInt: stmt with: index with: 0].
-	arg ==  nil ifTrue:[^self apiBindNull: stmt with: index].
-
-	arg isInteger ifTrue:[^self apiBindInt: stmt with: index with: arg].
-	arg isFloat ifTrue:[^self apiBindDouble: stmt with: index with: arg].
-	arg isString ifTrue:[^self apiBindText: stmt with: index with: arg with: arg size with: -1].
-	(arg isKindOf: DateAndTime) ifTrue:[ | string |
-		string _ String streamContents:[:s|
-			arg printYMDOn: s withLeadingSpace: false.
-			s nextPut: $T.
-			arg printHMSOn: s.
-		].
-		^self bindArg: string at: index in: stmt
-	].
-	self error: 'Cannot bind argument'! !
-
 !Sqlite3Library methodsFor: 'accessing' stamp: 'ab 1/31/2003 16:20'!
 changedRows: anSqliteRef
 	^ self apiChanges: anSqliteRef! !
-
-!Sqlite3Library methodsFor: 'accessing' stamp: 'cf 11/23/2005 15:36'!
-checkError: anError
-	|message|
-	(anError getHandle allSatisfy: [:i | i = 0]) ifTrue: [^ self].
-	message _ anError value fromCString.
-	anError free.
-	self error: message	! !
-
-!Sqlite3Library methodsFor: 'accessing' stamp: 'ar 12/8/2011 14:32'!
-checkErrorInteger: anError
-	|message|
-	(anError = 0) ifTrue: [^self].
-	"Get the errmsg"
-
-	message _ 'Result Code: ', anError asString.
-	self error: message! !
 
 !Sqlite3Library methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:52'!
 close: anSqliteRef
 	| err |
 	err _ self apiClose: anSqliteRef.
 	self checkErrorInteger: err.! !
-
-!Sqlite3Library methodsFor: 'accessing' stamp: 'ar 12/12/2011 19:04'!
-execute: query args: args on: sqliteRef do: aBlock
-	"Execute the given query, binding the arguments as needed"
-
-	| ppStmt hStmt code colCount result value err names rval |
-	ppStmt _ WordArray new: 1.
-	(err _ self apiPrepareV2: sqliteRef with: query with: query size with: ppStmt with: nil) == 0
-		ifFalse:[self error: 'sqlite_prepare_v2 failed: ', err printString].
-	hStmt _ ppStmt at: 1.
-	(self apiBindParameterCount: hStmt) = args size 
-		ifFalse:[self error:'Argument count mismatch'].
-	1 to: args size do:[:idx|
-		self bindArg: (args at: idx) at: idx in: hStmt.
-	].
-	colCount _ nil.
-	[code _ self apiStep: hStmt.
-	code = 100] whileTrue:[
-		colCount ifNil:[
-			colCount _ self apiColumnCount: hStmt.
-			result _ Array new: colCount.
-			names _ Array new: colCount.
-			1 to: colCount do:[:i|
-				names at: i put: (self apiColumnName: hStmt with: i-1) asSymbol.
-			].
-		].
-		1 to: colCount do:[:i| | colIdx |
-			colIdx _ i-1.
-			(self apiColumnType: hStmt with: colIdx) caseOf: {
-				[1] -> [value _ self apiColumnInt: hStmt with: colIdx].
-				[2] -> [value _ self apiColumnDouble: hStmt with: colIdx].
-				[3] -> [value _ self apiColumnText: hStmt with: colIdx].
-				[4] -> [self error: 'Blobs are not supported'].
-				[5] -> [value _ nil].
-			}.
-			result at: i put: value.
-		].
-		rval _ aBlock numArgs = result size 
-			ifTrue:[aBlock valueWithArguments: result]
-			ifFalse:[aBlock value: (SQLiteRecord names: names values: result)].
-	].
-	self apiFinalize: hStmt.
-	code = 101 ifFalse:[self error: 'Error code: ', code printString].
-	^rval! !
 
 !Sqlite3Library methodsFor: 'accessing' stamp: 'ab 12/16/2002 01:30'!
 freeResultBuffer: aResultBuffer
@@ -458,16 +395,153 @@ open: aString
 	self checkErrorInteger: err.
 	^ ref! !
 
-!Sqlite3Library methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:52'!
+!Sqlite3Library methodsFor: 'accessing' stamp: 'jpb 4/21/2021 08:34:06'!
 resultForQuery: aString on: sqliteRef
 	|nrows ncols buffer err|
 	nrows _ WordArray new: 1.
 	ncols _ WordArray new: 1.
 	err _ SqliteError new.
 	buffer _ SqliteResultBuffer new.
+	
 	self apiGetTable: sqliteRef sql: aString buffer: buffer rows: nrows columns: ncols error: err.
 	self checkError: err.
+	
 	^ SqliteResult buffer: buffer rows: nrows first columns: ncols first! !
+
+!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/19/2021 08:03:28'!
+bindArg: arg at: index in: stmt
+
+	arg == true ifTrue: [ ^self apiBindInt: stmt with: index with: 1].
+	arg == false ifTrue: [ ^self apiBindInt: stmt with: index with: 0].
+	arg ==  nil ifTrue: [ ^self apiBindNull: stmt with: index].
+
+	arg isInteger ifTrue: [ ^self apiBindInt: stmt with: index with: arg].
+	arg isFloat ifTrue: [ ^self apiBindDouble: stmt with: index with: arg].
+	arg isString ifTrue: [ ^self apiBindText: stmt with: index with: arg with: arg size with: -1].
+	arg class = ByteArray ifTrue: [ ^self apiBindBlob: stmt with: index with: arg with: arg size with: -1 ].
+	
+	(arg isKindOf: DateAndTime) ifTrue: [ | string |
+		string _ String streamContents: [:s|
+			arg printYMDOn: s withLeadingSpace: false.
+			s nextPut: $T.
+			arg printHMSOn: s.
+		].
+		^self bindArg: string at: index in: stmt
+	].
+
+	self error: 'Cannot bind argument'! !
+
+!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/21/2021 09:40:59'!
+execute: query args: args on: sqliteRef do: aBlock
+	"Execute the given query, binding the arguments as needed"
+
+	| ppStmt hStmt code colCount result errorCode names rval |
+	
+	ppStmt _ WordArray new: 1.
+	(errorCode _ self apiPrepareV2: sqliteRef with: query with: query size with: ppStmt with: nil) == 0
+		ifFalse:[self error: 'sqlite_prepare_v2 failed: ', (self findErrorMessageByCode: errorCode for: sqliteRef) ].
+		
+	hStmt _ ppStmt at: 1.
+	(self apiBindParameterCount: hStmt) = args size 
+		ifFalse:[self error:'Argument count mismatch'].
+	1 to: args size do:[:idx|
+		self bindArg: (args at: idx) at: idx in: hStmt.
+	].
+
+	colCount _ nil.
+	[code _ self apiStep: hStmt.
+	code = 100] whileTrue:[
+		colCount ifNil:[
+			colCount _ self apiColumnCount: hStmt.
+			result _ Array new: colCount.
+			names _ Array new: colCount.
+			1 to: colCount do:[:i|
+				names at: i put: (self apiColumnName: hStmt with: i-1) asSymbol.
+			].
+		].
+
+		self readColumns: colCount from: hStmt into: result.
+		 
+		rval _ aBlock numArgs = result size 
+			ifTrue:[aBlock valueWithArguments: result]
+			ifFalse:[aBlock value: (SQLiteRecord names: names values: result)].
+	].
+
+	self apiFinalize: hStmt.
+	code = 101 ifFalse: [self error: 'Error code: ', (self findErrorMessageByCode: code for: sqliteRef) ].
+	
+	^rval! !
+
+!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/21/2021 10:03:07'!
+readBlobColumnFrom: hStmt at: colIdx
+	| newBlobSize newArray blobData blobPointer |
+	blobData _ self apiColumnBlob: hStmt with: colIdx. 
+	newBlobSize _ self apiColumnBytes: hStmt with: colIdx. 
+	
+	newArray _ ByteArray new: newBlobSize.
+	blobPointer _ blobData getHandle.
+	
+	blobPointer isNull ifTrue: [ ^newArray ].
+	
+	(1 to: newBlobSize) do: [:byteIdx| 
+		newArray at: byteIdx put: (blobPointer byteAt: byteIdx)
+	].
+	
+	^newArray! !
+
+!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/21/2021 09:40:59'!
+readColumns: colCount from: hStmt into: result
+	1 to: colCount do: [:i | 
+		| colIdx |
+		
+		colIdx _ i - 1.
+		
+		result at: i put: (self readTypedColumnAt: colIdx from: hStmt).
+	].
+	! !
+
+!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/21/2021 09:41:52'!
+readTypedColumnAt: colIdx from: hStmt
+	| columnType |
+	
+	columnType _ (self apiColumnType: hStmt with: colIdx).
+	
+	1 = columnType ifTrue: [ ^ self apiColumnInt: hStmt with: colIdx ].
+	2 = columnType ifTrue: [ ^ self apiColumnDouble: hStmt with: colIdx ].
+	3 = columnType ifTrue: [ ^ self apiColumnText: hStmt with: colIdx ].
+	4 = columnType ifTrue: [ ^ self readBlobColumnFrom: hStmt at: colIdx ].
+	5 = columnType ifTrue: [ ^ nil].
+	
+	self error: 'Unsupported column type: ' , columnType asString.! !
+
+!Sqlite3Library methodsFor: 'errors' stamp: 'cf 11/23/2005 15:36'!
+checkError: anError
+	|message|
+	(anError getHandle allSatisfy: [:i | i = 0]) ifTrue: [^ self].
+	message _ anError value fromCString.
+	anError free.
+	self error: message	! !
+
+!Sqlite3Library methodsFor: 'errors' stamp: 'ar 12/8/2011 14:32'!
+checkErrorInteger: anError
+	|message|
+	(anError = 0) ifTrue: [^self].
+	"Get the errmsg"
+
+	message _ 'Result Code: ', anError asString.
+	self error: message! !
+
+!Sqlite3Library methodsFor: 'errors' stamp: 'jpb 4/18/2021 11:01:31'!
+findErrorMessageByCode: errorCode for: sqliteReference
+	| errorMessage |
+	
+	errorMessage _ sqliteReference isNull
+		ifTrue: [ '' ]
+		ifFalse: [ (self apiErrorMessage: sqliteReference) value fromCString ].
+		
+	errorMessage isEmpty
+		ifTrue: [ 	^errorCode printString ]
+		ifFalse: [ ^errorMessage , ' (Code: ' , errorCode printString , ')' ].! !
 
 !Sqlite3Library class methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:53'!
 default
@@ -692,9 +766,10 @@ free
 	Sqlite3Library default freeResultBuffer: buffer.
 	buffer _ nil.! !
 
-!SqliteResult methodsFor: 'public' stamp: 'ab 12/16/2002 01:58'!
+!SqliteResult methodsFor: 'public' stamp: 'jpb 4/21/2021 08:42:38'!
 nextKeysAndValuesDo: aBlock
 	self atEnd ifTrue: [self error: 'Trying to read past end of results'].
+	
 	columnNames do:
 		[:ea |
 		aBlock value: ea value: self nextString]! !
