@@ -1,10 +1,10 @@
-'From Cuis 5.0 [latest update: #4567] on 21 April 2021 at 10:03:34 am'!
+'From Cuis 5.0 [latest update: #4567] on 21 April 2021 at 1:31:59 pm'!
 'Description Cuis SQLite3 adapter for the SQLite3 file/in-memory database
 
 License: MIT
 Author: Josef Philip Berhart
 Authors of the Squeak version: Milan Vavra and others, see AUTHORS.md'!
-!provides: 'SQLiteAdapter' 1 20!
+!provides: 'SQLiteAdapter' 1 25!
 !requires: 'FFI' 1 33 nil!
 SystemOrganization addCategory: 'SQLiteAdapter'!
 SystemOrganization addCategory: 'SQLiteAdapter-Tests'!
@@ -60,16 +60,6 @@ ExternalStructure subclass: #SqliteReference
 SqliteReference class
 	instanceVariableNames: ''!
 
-!classDefinition: #SqliteResultBuffer category: 'SQLiteAdapter'!
-ExternalStructure subclass: #SqliteResultBuffer
-	instanceVariableNames: ''
-	classVariableNames: ''
-	poolDictionaries: ''
-	category: 'SQLiteAdapter'!
-!classDefinition: 'SqliteResultBuffer class' category: 'SQLiteAdapter'!
-SqliteResultBuffer class
-	instanceVariableNames: ''!
-
 !classDefinition: #SQLiteClient category: 'SQLiteAdapter'!
 Object subclass: #SQLiteClient
 	instanceVariableNames: 'reference fileName txn'
@@ -79,16 +69,6 @@ Object subclass: #SQLiteClient
 !classDefinition: 'SQLiteClient class' category: 'SQLiteAdapter'!
 SQLiteClient class
 	instanceVariableNames: 'registry'!
-
-!classDefinition: #SqliteResult category: 'SQLiteAdapter'!
-Object subclass: #SqliteResult
-	instanceVariableNames: 'buffer rows columns columnNames index'
-	classVariableNames: ''
-	poolDictionaries: ''
-	category: 'SQLiteAdapter'!
-!classDefinition: 'SqliteResult class' category: 'SQLiteAdapter'!
-SqliteResult class
-	instanceVariableNames: ''!
 
 
 !SQLiteClient commentStamp: 'spd 5/19/2010 14:50' prior: 0!
@@ -150,29 +130,28 @@ testInstanceCreation
 	
 ! !
 
-!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 1/17/2021 12:25:39'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 4/21/2021 13:29:20'!
 testPreparedStatements
 
-	(db execute: 'select * from sqlite_master' args: {}) ifEmpty:[
-		db execute: 'create table employee (id INTEGER PRIMARY KEY, name TEXT, created DATE)'
-			args: {}.
+	(db executeQuery: 'select * from sqlite_master') ifEmpty: [
+		db executeQuery: 'create table employee (id INTEGER PRIMARY KEY, name TEXT, created DATE)'.
 	].
 
-	db execute: 'insert into employee values (?, ?, ?)' 
-		args: {1. 'Adam'. DateAndTime now}.
+	db executeQuery: 'insert into employee values (?, ?, ?)' 
+		withAll: {1. 'Adam'. DateAndTime now}.
 		
-	db execute: 'insert into employee values (?, ?, ?)' 
-		args: {2. 'Eve'. nil}.
+	db executeQuery: 'insert into employee values (?, ?, ?)' 
+		withAll: {2. 'Eve'. nil}.
 		
-	db execute: 'select id, name from employee where name = ?' args: {'Adam'} do:[:id :name|
-		self assert: id = 1.
-		self assert: name = 'Adam'.
+	db executeQuery: 'select id, name from employee where name = ?' withAll: {'Adam'} do: [:record|
+		self assert: (record at: #id) = 1.
+		self assert: (record at: #name) = 'Adam'.
 	].
 
-	db execute: 'select * from employee where name = ?' args: {'Eve'} do:[:id :name :created|
-		self assert: id = 2.
-		self assert: name = 'Eve'.
-		self assert: created = nil.
+	db executeQuery: 'select * from employee where name = ?' withAll: {'Eve'} do: [:record|
+		self assert: (record at: #id) = 2.
+		self assert: (record at: #name) = 'Eve'.
+		self assert: (record at: #created) = nil.
 	].
 ! !
 
@@ -187,14 +166,14 @@ testRegistration
 	
 	self deny: (usedClass registry includes: db).	! !
 
-!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'tbn 1/25/2010 20:54'!
+!SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 4/21/2021 13:31:35'!
 testTableCreation
 	|sql|
 	db open.	
 	sql _ 'CREATE TABLE ABC (ID INTEGER PRIMARY KEY, Name TEXT)'.
 	db executeQuery: sql.
-	db withResultForQuery: 'select * from sqlite_master;' do: [:each | 
-		self assert: sql = (each nextRow at: 'sql')] 
+	db executeQuery: 'select * from sqlite_master;' do: [:record | 
+		self assert: sql = (record at: 'sql')] 
 	 ! !
 
 !SQLiteIntegrationTest methodsFor: 'testing' stamp: 'jpb 1/17/2021 12:25:22'!
@@ -320,12 +299,6 @@ apiFinalize: pStmt
 	<cdecl: long 'sqlite3_finalize' (ulong)>
 	^self externalCallFailed! !
 
-!Sqlite3Library methodsFor: 'api' stamp: 'cf 11/23/2005 15:32'!
-apiFreeTable: buffer
-	"void sqlite3_free_table(char **result)"
-	<cdecl: void 'sqlite3_free_table' (SqliteResultBuffer)>
-	^ self externalCallFailed! !
-
 !Sqlite3Library methodsFor: 'api' stamp: 'cf 11/23/2005 15:34'!
 apiGetTable: anSqlite sql: sql buffer: result rows: nRows columns: nColumns error: errBuffer
 	"int sqlite3_get_table(
@@ -379,10 +352,6 @@ close: anSqliteRef
 	err _ self apiClose: anSqliteRef.
 	self checkErrorInteger: err.! !
 
-!Sqlite3Library methodsFor: 'accessing' stamp: 'ab 12/16/2002 01:30'!
-freeResultBuffer: aResultBuffer
-	self apiFreeTable: aResultBuffer! !
-
 !Sqlite3Library methodsFor: 'accessing' stamp: 'ab 12/16/2002 00:23'!
 lastInsertId: anSqliteRef
 	^ self apiLastInsertId: anSqliteRef! !
@@ -394,19 +363,6 @@ open: aString
 	err _ self apiOpen: aString sqlite: ref.
 	self checkErrorInteger: err.
 	^ ref! !
-
-!Sqlite3Library methodsFor: 'accessing' stamp: 'jpb 4/21/2021 08:34:06'!
-resultForQuery: aString on: sqliteRef
-	|nrows ncols buffer err|
-	nrows _ WordArray new: 1.
-	ncols _ WordArray new: 1.
-	err _ SqliteError new.
-	buffer _ SqliteResultBuffer new.
-	
-	self apiGetTable: sqliteRef sql: aString buffer: buffer rows: nrows columns: ncols error: err.
-	self checkError: err.
-	
-	^ SqliteResult buffer: buffer rows: nrows first columns: ncols first! !
 
 !Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/19/2021 08:03:28'!
 bindArg: arg at: index in: stmt
@@ -431,7 +387,7 @@ bindArg: arg at: index in: stmt
 
 	self error: 'Cannot bind argument'! !
 
-!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/21/2021 09:40:59'!
+!Sqlite3Library methodsFor: 'prepared statements' stamp: 'jpb 4/21/2021 13:07:51'!
 execute: query args: args on: sqliteRef do: aBlock
 	"Execute the given query, binding the arguments as needed"
 
@@ -444,6 +400,7 @@ execute: query args: args on: sqliteRef do: aBlock
 	hStmt _ ppStmt at: 1.
 	(self apiBindParameterCount: hStmt) = args size 
 		ifFalse:[self error:'Argument count mismatch'].
+		
 	1 to: args size do:[:idx|
 		self bindArg: (args at: idx) at: idx in: hStmt.
 	].
@@ -462,9 +419,7 @@ execute: query args: args on: sqliteRef do: aBlock
 
 		self readColumns: colCount from: hStmt into: result.
 		 
-		rval _ aBlock numArgs = result size 
-			ifTrue:[aBlock valueWithArguments: result]
-			ifFalse:[aBlock value: (SQLiteRecord names: names values: result)].
+		rval _ aBlock value: (SQLiteRecord names: names values: result).
 	].
 
 	self apiFinalize: hStmt.
@@ -595,27 +550,6 @@ initialize
 	"SqliteReference initialize"
 	self defineFields! !
 
-!SqliteResultBuffer methodsFor: 'accessing'!
-value
-	"This method was automatically generated. See SqliteResultBuffer class>>fields."
-	<generated>
-	^ExternalData fromHandle: (handle pointerAt: 1) type: ExternalType void asPointerType! !
-
-!SqliteResultBuffer methodsFor: 'accessing'!
-value: anObject
-	"This method was automatically generated. See SqliteResultBuffer class>>fields."
-	<generated>
-	handle pointerAt: 1 put: anObject getHandle.! !
-
-!SqliteResultBuffer class methodsFor: 'field definition' stamp: 'ab 12/16/2002 00:35'!
-fields
-	"self defineFields"
-	^ #((value 'void*'))! !
-
-!SqliteResultBuffer class methodsFor: 'class initialization' stamp: 'ab 1/14/2003 15:28'!
-initialize
-	self defineFields! !
-
 !SQLiteClient methodsFor: 'finalization' stamp: 'tbn 1/25/2010 19:58'!
 actAsExecutor
 	super actAsExecutor.
@@ -647,19 +581,32 @@ close
 	reference _ nil.
 ! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'ar 12/12/2011 20:50'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:48:34'!
 commit
 	txn _ false.
-	self execute: 'COMMIT' args: {}.
+	self executeQuery: 'COMMIT' withAll: {}.
 ! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'ab 1/29/2003 16:37'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 13:00:42'!
 executeQuery: aString
-	^ self withResultForQuery: aString do:
-		[:result |
-		Array streamContents:
-			[:s |
-			result do: [:row | s nextPut: row]]]! !
+	^self executeQuery: aString withAll: #()! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:59:34'!
+executeQuery: aString do: aBlock
+	^self executeQuery: aString withAll: #() do: aBlock! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:57:59'!
+executeQuery: query withAll: args
+	^Array streamContents: [:arrayStream|
+		self executeQuery: query withAll: args do: [:result| arrayStream nextPut: result].
+	].! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:49:17'!
+executeQuery: query withAll: args do: aBlock
+
+	self isOpen ifFalse: [self open].
+	^Sqlite3Library default execute: query args: args on: reference do: aBlock.
+! !
 
 !SQLiteClient methodsFor: 'public' stamp: 'ab 12/16/2002 00:27'!
 fileName
@@ -682,16 +629,16 @@ open
 	self register.
 ! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'ar 12/12/2011 20:51'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:48:34'!
 rollback
 	txn _ false.
-	self execute: 'ROLLBACK' args: {}.
+	self executeQuery: 'ROLLBACK' withAll: {}.
 ! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'ar 12/12/2011 20:50'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:48:34'!
 transact
 	txn _ true.
-	self execute: 'BEGIN TRANSACTION' args: {}.
+	self executeQuery: 'BEGIN TRANSACTION' withAll: {}.
 ! !
 
 !SQLiteClient methodsFor: 'public' stamp: 'jpb 1/17/2021 12:01:31'!
@@ -707,27 +654,6 @@ transaction: aBlock
 	] ifCurtailed: [self rollback].
 
 	^result! !
-
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/17/2021 12:01:18'!
-withResultForQuery: aString do: aBlock
-	|result|
-	self isOpen ifFalse: [self open].
-	result _ Sqlite3Library default resultForQuery: aString on: reference.
-	
-	^ [aBlock value: result] ensure: [result free]! !
-
-!SQLiteClient methodsFor: 'prepared statements' stamp: 'ar 12/9/2011 19:23'!
-execute: query args: args
-	^Array streamContents:[:s|
-		self execute: query args: args do:[:result| s nextPut: result].
-	].! !
-
-!SQLiteClient methodsFor: 'prepared statements' stamp: 'jpb 1/14/2021 19:14:35'!
-execute: query args: args do: aBlock
-
-	self isOpen ifFalse: [self open].
-	^Sqlite3Library default execute: query args: args on: reference do: aBlock.
-! !
 
 !SQLiteClient methodsFor: 'as yet unclassified' stamp: 'jpb 1/17/2021 12:23:30'!
 initializeWith: newSettings
@@ -746,99 +672,5 @@ newFrom: newSettings
 !SQLiteClient class methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:58'!
 registry
 	^ registry ifNil: [registry _ WeakRegistry new]! !
-
-!SqliteResult methodsFor: 'public' stamp: 'ab 12/16/2002 01:58'!
-atEnd
-	^ index > (rows + 1 * columns)! !
-
-!SqliteResult methodsFor: 'public' stamp: 'ab 1/29/2003 16:06'!
-columnNames
-	^ columnNames! !
-
-!SqliteResult methodsFor: 'public' stamp: 'ab 12/16/2002 01:56'!
-do: aBlock
-	self reset.
-	rows timesRepeat: [aBlock value: self nextRow].
-	! !
-
-!SqliteResult methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
-free
-	Sqlite3Library default freeResultBuffer: buffer.
-	buffer _ nil.! !
-
-!SqliteResult methodsFor: 'public' stamp: 'jpb 4/21/2021 08:42:38'!
-nextKeysAndValuesDo: aBlock
-	self atEnd ifTrue: [self error: 'Trying to read past end of results'].
-	
-	columnNames do:
-		[:ea |
-		aBlock value: ea value: self nextString]! !
-
-!SqliteResult methodsFor: 'public' stamp: 'tbn 1/25/2010 19:54'!
-nextRow
-	|row|
-	row _ Dictionary new.
-	self nextKeysAndValuesDo: [:k :v | row at: k put: v].
-	^ row! !
-
-!SqliteResult methodsFor: 'public' stamp: 'ab 1/29/2003 16:34'!
-nextValues
-	^ columnNames collect: [:ea | self nextString]! !
-
-!SqliteResult methodsFor: 'public' stamp: 'tbn 1/25/2010 19:55'!
-reset
-	index _ 1.
-	self readColumns.! !
-
-!SqliteResult methodsFor: 'accessing' stamp: 'jpb 1/17/2021 11:58:37'!
-currentAddress
-	|base current|
-	base _ buffer value getHandle.
-	current _ base + ((index - 1) * base size).
-
-	^ current! !
-
-!SqliteResult methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:55'!
-nextString
-	|str|
-	buffer ifNil: [self error: 'Result has been freed'].
-	str _ self readString.
-	index _ index + 1.
-	^ str! !
-
-!SqliteResult methodsFor: 'accessing' stamp: 'tbn 1/25/2010 19:55'!
-setBuffer: aResultBuffer rows: nRows columns: nColumns
-	buffer _ aResultBuffer.
-	rows _ nRows.
-	columns _ nColumns.
-	self reset.! !
-
-!SqliteResult methodsFor: 'reading' stamp: 'tbn 1/25/2010 19:55'!
-readColumns
-	columnNames _ OrderedCollection new.
-	columns timesRepeat: [columnNames add: self nextString]! !
-
-!SqliteResult methodsFor: 'reading' stamp: 'ab 12/16/2002 01:47'!
-readString
-	^ self readStringAtAddress: (self currentAddress)! !
-
-!SqliteResult methodsFor: 'reading' stamp: 'jpb 1/17/2021 12:00:02'!
-readStringAtAddress: anAddress
-	|deref i char|
-	deref _ anAddress pointerAt: 1.
-	(deref allSatisfy: [:ea | ea = 0]) ifTrue: [^ nil].
-	
-	^ String streamContents:
-		[:stream |
-		i _ 1.
-		[(char _ deref unsignedCharAt: i) asciiValue = 0] 
-			whileFalse:
-				[stream nextPut: char.
-				 i _ i + 1]]! !
-
-!SqliteResult class methodsFor: 'instance creation' stamp: 'ab 12/16/2002 01:41'!
-buffer: aResultBuffer rows: nRows columns: nColumns
-	^ self new setBuffer: aResultBuffer rows: nRows columns: nColumns! !
 SqliteError initialize!
 SqliteReference initialize!
-SqliteResultBuffer initialize!
