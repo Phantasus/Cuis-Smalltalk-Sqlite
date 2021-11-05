@@ -1,10 +1,10 @@
-'From Cuis 5.0 [latest update: #4567] on 21 April 2021 at 1:31:59 pm'!
+'From Cuis 5.0 [latest update: #4928] on 5 November 2021 at 7:38:30 pm'!
 'Description Cuis SQLite3 adapter for the SQLite3 file/in-memory database
 
 License: MIT
 Author: Josef Philip Berhart
 Authors of the Squeak version: Milan Vavra and others, see AUTHORS.md'!
-!provides: 'SQLiteAdapter' 1 25!
+!provides: 'SQLiteAdapter' 1 27!
 !requires: 'FFI' 1 33 nil!
 SystemOrganization addCategory: 'SQLiteAdapter'!
 SystemOrganization addCategory: 'SQLiteAdapter-Tests'!
@@ -62,7 +62,7 @@ SqliteReference class
 
 !classDefinition: #SQLiteClient category: 'SQLiteAdapter'!
 Object subclass: #SQLiteClient
-	instanceVariableNames: 'reference fileName txn'
+	instanceVariableNames: 'reference fileName txn library'
 	classVariableNames: ''
 	poolDictionaries: ''
 	category: 'SQLiteAdapter'!
@@ -567,17 +567,23 @@ register
 unregister
 	self class registry remove: self ifAbsent: []! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:24:22'!
+beginTransaction
+	txn _ true.
+	self executeQuery: 'BEGIN TRANSACTION' withAll: {}.
+! !
+
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:37:21'!
 changedRows
 	^ self isOpen
-		ifTrue: [Sqlite3Library default changedRows: reference]
+		ifTrue: [ library changedRows: reference]
 		ifFalse: [0]
 	! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:37:28'!
 close
 	self unregister.
-	self isOpen ifTrue: [Sqlite3Library default close: reference].
+	self isOpen ifTrue: [ library close: reference].
 	reference _ nil.
 ! !
 
@@ -601,11 +607,11 @@ executeQuery: query withAll: args
 		self executeQuery: query withAll: args do: [:result| arrayStream nextPut: result].
 	].! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:49:17'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:37:37'!
 executeQuery: query withAll: args do: aBlock
 
 	self isOpen ifFalse: [self open].
-	^Sqlite3Library default execute: query args: args on: reference do: aBlock.
+	^library execute: query args: args on: reference do: aBlock.
 ! !
 
 !SQLiteClient methodsFor: 'public' stamp: 'ab 12/16/2002 00:27'!
@@ -616,16 +622,16 @@ fileName
 isOpen
 	^ reference notNil and: [reference getHandle anySatisfy: [:i | i > 0]]! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:37:53'!
 lastInsertId
 	^ self isOpen
-		ifTrue: [Sqlite3Library default lastInsertId: reference]
+		ifTrue: [ library lastInsertId: reference]
 		ifFalse: [0]
 	! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/14/2021 19:14:35'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:38:02'!
 open
-	reference _ Sqlite3Library default open: fileName.
+	reference _ library open: fileName.
 	self register.
 ! !
 
@@ -635,31 +641,26 @@ rollback
 	self executeQuery: 'ROLLBACK' withAll: {}.
 ! !
 
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 4/21/2021 12:48:34'!
-transact
-	txn _ true.
-	self executeQuery: 'BEGIN TRANSACTION' withAll: {}.
-! !
-
-!SQLiteClient methodsFor: 'public' stamp: 'jpb 1/17/2021 12:01:31'!
+!SQLiteClient methodsFor: 'public' stamp: 'jpb 11/5/2021 19:24:22'!
 transaction: aBlock
 	"Wrap the given block inside a transaction"
 	| result |
 	txn ifNotNil: [^aBlock value].
 	
 	[
-		self transact.
+		self beginTransaction.
 		result _ aBlock value.
 		self commit.
 	] ifCurtailed: [self rollback].
 
 	^result! !
 
-!SQLiteClient methodsFor: 'as yet unclassified' stamp: 'jpb 1/17/2021 12:23:30'!
+!SQLiteClient methodsFor: 'as yet unclassified' stamp: 'jpb 11/5/2021 19:37:43'!
 initializeWith: newSettings
 	self initialize.
 	
-	fileName _ newSettings at: #filename! !
+	fileName _ newSettings at: #filename.
+	library _ newSettings at: #library ifAbsent: [ Sqlite3Library default ].! !
 
 !SQLiteClient class methodsFor: 'instance creation' stamp: 'jpb 1/17/2021 12:20:56'!
 newFrom: newSettings
